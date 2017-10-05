@@ -3,53 +3,21 @@
 $title='I am the title';
 $programName='RandomName';
 $programExplanation='Random Explanation';
+$dbObject = new mysqli("localhost","web","nouser","bible");
+$mobile=0;
 
-?>
+//Functions
+function optgroups($dbObject) {
 
-
-<!DOCTYPE html
-	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
-	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-
-<html xmlns="http://www.w3.org/1999/xhtml" lang="en-US" xml:lang="en-US">
-
-<head>
-
-    <title><?=$title?></title>
-
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-
-</head>
-
-<body bgcolor="white">
-<?php 
-    
-?>
-<p><strong><?=$programName ?></strong></p>
-<p><?=$programExplanation ?></p>
-
-<form method="post" action="">
-
-<table>
-<tr>
-    <td>What to search:</td>
-    
-    <td>
-    <select name="book"  id="book">
-
-    <?php
-
-    // dbObject
-    $dbObject = new mysqli("localhost","web","nouser","bible");
 
     // Select Statement Section
     $sqlSectionSelect="SELECT bsect as sectionLetter, sectname as sectionName FROM section ORDER BY sectorder;";
 
     // sql Object Section
-    if (!( $sqlSectionObject=$dbObject->prepare($sqlSectionSelect))) {
+    if (!( $sqlSectionObject=$dbObject->prepare($sqlSectionSelect) )) {
         print "Prepare section failed: (" . $dbObject->errno . ")" . $dbObject->error;
     }
-    
+
     //Execute Sections
 
     if (!($sqlSectionObject->execute())) {
@@ -65,7 +33,7 @@ $programExplanation='Random Explanation';
     if (!( $sqlSectionObject->bind_result($sectionLetter,$sectionName))) {
         print "bind_param section failed: (" . $dbObject->errno . ")" . $dbObject->error;
         }
-   
+
     // fetch records for Section
 
     while ($sqlSectionObject->fetch()) {
@@ -78,14 +46,14 @@ $programExplanation='Random Explanation';
 
     // sql Object Books
     if (!( $sqlBookObject=$dbObject->prepare($sqlBookSelect))) {
-        print "Prepare book failed: (" . $dbObject->errno . ")" . $dbObject->error;    
+        print "Prepare book failed: (" . $dbObject->errno . ")" . $dbObject->error;
     }
 
     foreach ( $section as $bsect=>$sectname ) {
-        
+
         //setup optgroup
         print "\t<optgroup label=\"$sectname\">\n";
-        
+
         // hardcode for "ALL"
         if ( $bsect == "ALL" ) {
             foreach ( $section as $bsect=>$sectname ) {
@@ -97,21 +65,21 @@ $programExplanation='Random Explanation';
             if (!($sqlBookObject->bind_param("s", $bsect))) {
                 print "bind_param books failed: (" . $dbObject->errno .")" . $dbObject->error;
             }
-    
+
             // execute Books
             if (!($sqlBookObject->execute())) {
                 print "Execute books failed: (" . $dbObject->errno . ")" . $dbObject->error;
             }
-    
+
             // create and initialize variables to use for results
             $bnum = NULL;
             $bname = NULL;
-    
+
             // bind results to variables
             if (!($sqlBookObject->bind_result($bnum, $bname))) {
                 print "bind_results books failed: (" . $dbObject->errno . ")" . $dbObject-error;
             }
-    
+
             // fetch books in loop
             while ($sqlBookObject->fetch()) {
                 print "\t\t<option value=\"$bnum\">$bname</option>\n";
@@ -122,43 +90,102 @@ $programExplanation='Random Explanation';
         print "\t</optgroup>\n";
     }
     $dbObject->close();
-
-    ?>
-    
-    </select>
-    </td>
-</tr> 
+}
 
 
-<tr>
-    <td>Word or words to search for:</td> <td><input type="text" name="phrase"  size="60" /></td>
-</tr>
+//mobile view
+if ($mobile) {
 
+//close php and print out html with jQueryMobile
+?>
 
-<tr>
-    <td>Treat words as phrase:</td> <td><label><input type="radio" name="as_phrase" value="1" />yes</label> <label><input type="radio" name="as_phrase" value="0" checked="checked" />no</label></td>
-</tr>
-
-
-<tr>
-    <td>Return count only:</td> <td><label><input type="radio" name="count_only" value="1" />yes</label> <label><input type="radio" name="count_only" value="0" checked="checked" />no</label></td>
-</tr>
-
-</table>
-
-<br /><input type="submit" name="choice" value="Search" /><div><input type="hidden" name=".cgifields" value="count_only"  /><input type="hidden" name=".cgifields" value="as_phrase"  />
-
-</div>
-
-</form>
-
-<br />
-<?php
-    $visitTime=date('Y-m-d H:i:s', $_SERVER['REQUEST_TIME']);
-    $browserVersion=$_SERVER['HTTP_USER_AGENT'];
-    $visitorIP=$_SERVER['REMOTE_ADDR'];
-    print "You requested this page with $browserVersion from $visitorIP at $visitTime";
-?>       
-
+<!doctype html>
+<html>
+<head>
+    <title>Form Elements</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="http://code.jquery.com/mobile/latest/jquery.mobile.min.css" rel="stylesheet" type="text/css" />
+    <script type="text/javascript" src="http://code.jquery.com/jquery-latest.min.js "></script>
+    <script type="text/javascript" src="http://code.jquery.com/mobile/latest/jquery.mobile.min.js"></script>
+</head>
+<body>
+	<section data-role="page" id="first" data-theme="c">
+		<header data-role="header">
+			<h1>Forms</h1>
+		</header>
+		<article data-role="content">
+			<h2>Mobile Application</h2>
+			<form method="get" action="dhtml/9.Forms.dhtml">
+				<input name="subject" type="hidden" value="Class" />
+                
+				<fieldset>
+					<legend>Where to search</legend>
+					<label for="books">Books</label>
+					<select tabindex="-1" multiple="multiple" name="book" id="book" data-native-menu="false">
+		            
+                    <?php optgroups($dbObject) ?>
+                    
+                    </select>
+					<br />
+					<label for="search">Search Words:</label>
+					<input type="text" name="search" id="search" />
+					<br />
+				</fieldset>
+				<div>
+					<input type="submit" name="submit" value="Send Form" />
+				</div>
+			</form>
+		</article>
+	<footer data-role="footer"><h1>int620 - jQuery Mobile View</h1></footer>
+	</section>
 </body>
 </html>
+
+<?php } // Close php if
+
+else {
+
+?>
+
+<!doctype html>
+<html>
+<head>
+    <title>Form Elements</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="http://code.jquery.com/mobile/latest/jquery.mobile.min.css" rel="stylesheet" type="text/css" />
+    <script type="text/javascript" src="http://code.jquery.com/jquery-latest.min.js "></script>
+    <script type="text/javascript" src="http://code.jquery.com/mobile/latest/jquery.mobile.min.js"></script>
+</head>
+<body>
+	<section data-role="page" id="first" data-theme="a">
+		<header data-role="header">
+			<h1>Forms</h1>
+		</header>
+		<article data-role="content">
+			<h2>Desktop Application</h2>
+			<form method="get" action="dhtml/9.Forms.dhtml">
+				<input name="subject" type="hidden" value="Class" />
+                
+				<fieldset>
+					<legend>Where to Search</legend>
+					<label for="book">Books</label>
+					<select id="book" name="book">
+		            
+                    <?php optgroups($dbObject) ?>
+                    
+                    </select>
+					<br />
+					<label for="studentid">Word or Words to search</label>
+					<input type="text" name="book" id="studentid" />
+					<br />
+				</fieldset>
+				<div>
+					<input type="submit" name="submit" value="Send Form" />
+				</div>
+			</form>
+		</article>
+	<footer data-role="footer"><h1>int620 - jQuery Desktop View</h1></footer>
+	</section>
+</body>
+</html>
+<?php } // Close else ?>
