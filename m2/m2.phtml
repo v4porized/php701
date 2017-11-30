@@ -1,0 +1,489 @@
+<?php
+
+$title='m2 php701';
+$dbObject = new mysqli("localhost","web","nouser","bible");
+$mobile=0;
+
+//Functions
+function getCollection($dbObject) {
+
+    // Select Statement Section
+    $sqlSectionSelect="SELECT bsect as sectionLetter, sectname as sectionName FROM section ORDER BY sectorder;";
+
+    // sql Object Section
+    if (!( $sqlSectionObject=$dbObject->prepare($sqlSectionSelect) )) {
+        print "Prepare section failed: (" . $dbObject->errno . ")" . $dbObject->error;
+    }
+
+    //Execute Sections
+    if (!($sqlSectionObject->execute())) {
+        print "Execute section failed: (" . $dbObject->errno . ") " . $dbObject->error;
+    }
+
+    // create and initialize variables for results Section
+    $sectionLetter = NULL;
+    $sectionName = NULL;
+    $section = array("ALL"=>"Entire Collection"); // hard code ALL
+
+    // bind variables for results Section
+    if (!( $sqlSectionObject->bind_result($sectionLetter,$sectionName))) {
+        print "bind_param section failed: (" . $dbObject->errno . ")" . $dbObject->error;
+        }
+
+    // fetch records for Section
+
+    while ($sqlSectionObject->fetch()) {
+        //Store in Array for later use
+        $section["$sectionLetter"] = "$sectionName";
+    }
+
+    //Select Statement Books
+    $sqlBookSelect="SELECT bnum, bname FROM books WHERE bsect = ? ORDER BY bnum;";
+
+    // sql Object Books
+    if (!( $sqlBookObject=$dbObject->prepare($sqlBookSelect))) {
+        print "Prepare book failed: (" . $dbObject->errno . ")" . $dbObject->error;
+    }
+
+    foreach ( $section as $bsect=>$sectname ) {
+
+        //setup optgroup
+        print "\t<optgroup label=\"$sectname\">\n";
+
+        // hardcode for "ALL"
+        if ( $bsect == "ALL" ) {
+            foreach ( $section as $bsect=>$sectname ) {
+                print "\t<option value=\"$bsect\">$sectname</option>";
+            }
+        }
+        else {
+            // bind Param for Books Execute
+            if (!($sqlBookObject->bind_param("s", $bsect))) {
+                print "bind_param books failed: (" . $dbObject->errno .")" . $dbObject->error;
+            }
+
+            // execute Books
+            if (!($sqlBookObject->execute())) {
+                print "Execute books failed: (" . $dbObject->errno . ")" . $dbObject->error;
+            }
+
+            // create and initialize variables to use for results
+            $bnum = NULL;
+            $bname = NULL;
+
+            // bind results to variables
+            if (!($sqlBookObject->bind_result($bnum, $bname))) {
+                print "bind_results books failed: (" . $dbObject->errno . ")" . $dbObject->error;
+            }
+
+            // fetch books in loop
+            while ($sqlBookObject->fetch()) {
+                print "\t\t<option value=\"$bnum\">$bname</option>\n";
+            }
+        }
+
+        //end optgroup
+        print "\t</optgroup>\n";
+    }
+} // End function optgroups (populates the dropdown)
+
+
+function search($dbObject) {
+
+	//----------- variables for statement ------------
+
+    $fields = "bsect, bname, bnum, cnum, vnum, vtext";
+	$table = "kjv";
+	$match = "MATCH(vtext) AGAINST (? $booleanMode)";
+	$order = "ORDER BY relevance DESC, bnum ASC, cnum ASC, vnum ASC";
+    $recordsPerPage=10;
+    $searchQuery=$_REQUEST['searchQuery'];
+
+    // ----------- prepare $booleanMode ------------
+
+    if ($_REQUEST['advSearch']) {
+        $booleanMode="IN BOOLEAN MODE";
+    }
+    else {
+        $booleanMode="";
+    }
+
+	//------------ prepare $wherebook ---------------
+	
+	foreach (range(1,66) as $book) {	
+		$validBook[$book] = 1;	
+	}
+	
+	$validSection{'O'} = 1;
+	$validSection{'N'} = 1;
+	
+	$book = $_REQUEST['book'];
+	
+	if (isset($validSection{$book})) {
+		$wherebook = ("AND bsect = '$book'");
+	}
+	elseif (isset($validBook[$book])) {
+		$wherebook = ("AND bnum = '$book'");
+	}
+	else{
+		//No Valid Section or Book wherebook=nothing
+		$wherebook="";
+	}
+
+	// Testing
+	// $wherebook="AND bsect = '$book'";
+	
+	// ------------------------- count records ------------------------
+	
+	// Select count statement
+	$recordCountStatement = "SELECT COUNT(*) FROM $table WHERE $match $wherebook";
+
+	// prepare execute and fetch result
+	if ($sqlCountObject = $dbObject->prepare($recordCountStatement)) {
+		$sqlCountObject->bind_param("s", $searchQuery);
+		$sqlCountObject->execute();
+		$sqlCountObject->bind_result($resultCount);
+        while ($sqlCountObject->fetch()) {
+        $count=$resultCount;
+        }
+        $sqlCountObject->close();
+    }
+
+	// --------------- If count is 0 no results -----------------------------------------
+    if ($count == 0 || $_REQUEST['countOnly'] == 1) {	
+		print ("<h3>There are $count results for $searchQuery</h3>");
+	}
+	else { // --- if results and no countOnly process paging and search -----------------
+	
+		// ------------------------ Paging ($LIMIT) -----------------------
+
+		// calc total pages
+		$totalPages = ceil($count/$recordsPerPage);
+		$page = ($_REQUEST['page'] > 0 && $_REQUEST['page'] <= $totalPages)? $_REQUEST['page'] : 1;
+		$offset=(($page-1) * $recordsPerPage);
+		$limit=("LIMIT $offset,$recordsPerPage");
+
+		//-------------- dynamic statement search statement ---------------
+		
+		$sqlSearchStatement = "SELECT $fields, $match AS relevance FROM $table WHERE $match $wherebook $order $limit;";
+
+		// -------------- Search for results based on page ---------------
+
+	/* Troubleshooting 
+		print "<h3>$sqlSearchStatement</h3>"; 
+		if (!($sqlSearchObject=$dbObject->prepare($sqlSearchStatement))) {
+			print "Prepare search failed: $sqlSearchStatement (" . $dbObject->errno . ")" . $dbObject->error;
+		}
+		if (!($sqlSearchObject->bind_param("ss", $_REQUEST['searchQuery'], $_REQUEST['searchQuery']))) {
+			print "bind_param failed: $_REQUEST[searchQuery] (" . $dbObject->errno . ")" . $dbObject->error;
+		}
+		if (!($sqlSearchObject->execute())) {
+			print "Execute search failed: $sqlSearchStatement (" . $dbObject->errno . ")" . $dbObject->error;
+		}
+		if (!($sqlSearchObject->bind_result($bsect, $bname, $bnum, $cnum, $vnum, $vtext, $relevance))) {
+			print "bind_results search failed: (" . $dbObject->errno . ")" . $dbObject->error;
+		}
+		while ($sqlSearchObject->fetch()) {
+			print "$bsect $bname $bnum $cnum $vnum $vtext, $relevance\n";
+		}
+	*/
+
+		if ($sqlSearchObject=$dbObject->prepare($sqlSearchStatement)) {
+			$sqlSearchObject->bind_param("ss", $searchQuery, $searchQuery);
+			$sqlSearchObject->execute();
+			$sqlSearchObject->bind_result($bsect, $bname, $bnum, $cnum, $vnum, $vtext, $match);
+
+	   
+		// --------------------- Print Results --------------------------
+
+			print '<div class="container">';
+			print "\n";
+			while ($sqlSearchObject->fetch()) {
+				print '<div class="container"><li><h3>'; // opening div
+				print "$bname:$bnum:$vnum</h3></li>\n";
+				print '<ul><li><div class="col-md-10 col-md-offset-1 text-left">'; //setup for results list
+				print "\n<p>$vtext</p><br></div></li></ul></div>\n"; //vtext result
+			}
+			print ("</div>\n");
+		}
+
+		
+		
+		// ---------------- Generate URIs for pages ------------------------
+		$uri="m2.phtml?";
+		
+
+		//Loop through $_REQUEST get values, encode user values for http use
+		foreach ($_REQUEST as $key=>$value) {
+			if ( $key == "searchQuery") {
+				$uri.="$key=" . urlencode($value) . '&';
+			}
+			elseif ($key != "page") {
+				$uri.="$key=$value&";
+			}
+		}
+		
+		foreach (range(1,$totalPages) as $i) {
+			
+			if ( $page == $i) {
+				print ("$i "); // only print number for current page
+			}
+			else {
+				print ("<a href=\"$uri" . "page=$i\">$i</a> ");
+			}
+		}
+	} // End if Count
+} // End of search function
+
+
+//mobile view
+if ($mobile) {
+
+//close php and print out html with jQueryMobile
+?>
+
+<!doctype html>
+<html>
+<head>
+    <title>Form Elements</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="http://code.jquery.com/mobile/latest/jquery.mobile.min.css" rel="stylesheet" type="text/css" />
+    <script type="text/javascript" src="http://code.jquery.com/jquery-latest.min.js "></script>
+    <script type="text/javascript" src="http://code.jquery.com/mobile/latest/jquery.mobile.min.js"></script>
+</head>
+<body>
+	<section data-role="page" id="first" data-theme="c">
+		<header data-role="header">
+			<h1>Forms</h1>
+		</header>
+		<article data-role="content">
+			<h2>Mobile Application</h2>
+			<form method="get" action="dhtml/9.Forms.dhtml">
+				<input name="subject" type="hidden" value="Class" />
+                
+				<fieldset>
+					<legend>Where to search</legend>
+					<label for="books">Books</label>
+					<select tabindex="-1" name="book" id="book" data-native-menu="false">
+		            
+                    <?php getCollection($dbObject); ?>
+                    
+                    </select>
+					<br />
+					<label for="search">Search Words:</label>
+					<input type="text" name="searchQuery" id="searchQuery" />
+					<br />
+				</fieldset>
+				<div>
+					<input type="submit" name="submit" value="Send Form" />
+					<input type="checkBox" id="advSearch" name="advSearch" value="1" checked>
+					<label for="advSearch">Advanced Search</label>
+				</div>
+			</form>
+		</article>
+	<footer data-role="footer"><h1>int620 - jQuery Mobile View</h1></footer>
+	</section>
+</body>
+</html>
+
+<?php } // Close php if
+
+//Desktop View
+else {
+	
+	if (!isset($_REQUEST['searchQuery'])) {
+		
+	?>
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en-US" xml:lang="en-US">
+	<head>
+		<title><?php print " $title "; ?></title>
+		<meta charset="utf-8">
+		<meta name="description" content="">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<link rel="stylesheet" href="css/bootstrap.min.css">
+		<link rel="stylesheet" href="css/jquery.fancybox.css">
+		<link rel="stylesheet" href="css/main.css">
+		<link rel="stylesheet" href="css/responsive.css">
+		<link rel="stylesheet" href="css/animate.min.css">
+		<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.4.0/css/font-awesome.min.css">
+		<script type="text/javascript" src="/jQuery/bin/jquery.js"></script>
+	</head>
+
+<script type="text/javascript">
+// Attach a submit handler to the form 
+$(document).ready(function() {
+	$("#form").submit(function(event) {
+
+		// Prevent default submit behavior
+    		event.preventDefault();
+
+   		 // Clear result div
+   		 $("#result").html('');
+
+  		  // Get some values from elements on the page: 
+    		var values = $(this).serialize();
+
+    		//Send the data using post and put the results in a div 
+    		$.ajax({
+        		url: "",
+        		type: "get",
+        		data: values,
+        		success: function(data){
+        	    		//alert('success');
+        	    		$("#result").html( data );
+        		},
+        		error:function(){
+        	    		//alert("failure");
+        	    		$("#result").html('There is error while submitting');
+        		}
+    		});
+	});
+
+	$( "a" ).click( function( anchor )
+	{
+		anchor.preventDefault();
+		var linkObject = $( this );
+		$( "#result" ).html('');
+		$.ajax({
+			url: linkObject.attr( "href" ),
+			type: "get",
+			dataType: "html",
+			error: function(){
+				$( "#result" ).html( "<p>PAGE NOT FOUND</p>");
+			},
+			success: function( newData ){
+				$( "#result" ).html( newData );
+			}
+		});	
+	});
+});
+</script>
+
+
+<body>
+<!-- header section -->
+<section class="banner" role="banner">
+  <header id="header"> 
+    <!-- navigation section  -->
+    <div class="header-content clearfix"> <a class="logo" href="#"><img src="images/logo.png" alt="Mafolio"></a>
+      <nav class="navigation" role="navigation">
+        <ul class="primary-nav">
+          <li><a href="about.html">About Me</a></li>
+          <li><a href="contact.html">Contact</a></li>
+          <li><a href="#">External link</a></li>
+        </ul>
+      </nav>
+      <a href="#" class="nav-toggle">Menu<span></span></a> </div>
+    <!-- navigation section  --> 
+  </header>
+  
+  <!-- form text -->
+  <div class="container">
+    <div class="col-md-10 col-md-offset-1">
+      <div class="banner-text text-center">
+        <h1>What to search</h1>
+		<div id="searchForm">
+			<form action="" method="get" id="form" name="form" enctype="multipart/form-data">
+			<!--My Code -->
+			<select name="book" id="book">
+
+			<?php getCollection($dbObject); ?>
+
+            </select>
+			
+			<h2>Word or words to search for:</h2>
+			<input type="text" name="searchQuery" id="searchQuery">
+			<br>
+            <br>
+			<input type="submit" value="Search" name="submit">
+			<input type="reset" value="Reset">
+			<br>
+			
+			<!-- Checkboxes -->
+			
+			<h3>
+			<label for="advSearch">Advanced Search:</label>
+			<input type="checkBox" id="advSearch" name="advSearch" value="1" checked>
+			</h3>
+			
+			<h3>
+			<label for="countOnly">Return Count Only:</label>
+			<input type="checkBox" id="countOnly" name="countOnly" value="1">
+			</h3>
+			
+			<!-- Other variables
+			<input type="hidden" name="sid" value="<?php #$sid ?>">
+			-->
+		</form>
+      </div>
+    </div>
+  </div>
+ </div>
+</section>
+<!-- header section -->
+
+<!-- results section -->
+<section id="descripton" class="section descripton">
+	<div name="result" id="result" class="result">
+	</div>
+</section>
+
+<!-- footer -->
+<footer class="section footer">
+  <div class="footer-bottom">
+    <div class="container">
+      <div class="col-md-12">
+        <p>© 2015 All rights reserved. All Rights Reserved<br>
+          Made with <i class="fa fa-heart pulse"></i> by <a href="http://www.designstub.com/">Designstub</a></p>
+      </div>
+    </div>
+  </div>
+</footer>
+<!-- footer --> 
+
+<!-- JS FILES 
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
+<script src="js/bootstrap.min.js"></script> 
+<script src="js/jquery.fancybox.pack.js"></script> 
+<script src="js/jquery.waypoints.min.js"></script> 
+<script src="js/retina.min.js"></script> 
+<script src="js/modernizr.js"></script> 
+<script src="js/main.js"></script>
+-->
+
+</body>
+</html>
+<!-- END OF FORM -->
+	<?php } // end if (!($_REQUEST{searchQuery}))
+	
+	else { // provide results ?>
+		<!-- update results AJAX -->
+<script type="text/javascript">
+	$( "a" ).click( function( anchor ) {
+		anchor.preventDefault();
+		var linkObject = $( this );
+		$( "#result" ).empty();
+		$.ajax({
+			url: linkObject.attr( "href" ),
+			type: "get",
+			dataType: "html",
+			error: function()
+			{
+				$( "#result" ).html( "<p>PAGE NOT FOUND</p>" );
+			},
+			success: function( newData )
+			{
+				$( "#result" ).html( newData );
+			}
+		});
+	});
+</script>
+<?php
+		search($dbObject);
+		
+	}
+	
+} // Close else ?>
